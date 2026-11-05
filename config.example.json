@@ -1,0 +1,17 @@
+{
+  "currency": "USD",
+  "invoice_issuer": "TI Corporativa",
+  "vendor": "VMware",
+  "file_prefix": "vmware-focus",
+  "rates_monthly": { "vcpu": 15.00, "memory_gb": 5.00, "storage_gb": 0.10 },
+  "compute_factor": { "poweredOn": 1.0, "poweredOff": 0.0, "suspended": 0.0 },
+  "storage_basis": "provisioned",
+  "templates": "storage_only",
+  "srm_placeholders": "exclude",
+  "max_carry_forward_days": 3,
+  "tags": {
+    "include": [],
+    "exclude_prefixes": ["FW_"],
+    "add_inventory_tags": true
+  }
+}

@@ -1,0 +1,11 @@
+build/
+build.zip
+out/
+state/
+__pycache__/
+*.pyc
+.pytest_cache/
+config.json
+# exports reales de RVTools / inventario (datos del cliente)
+*.xlsx
+vinfo_*.csv

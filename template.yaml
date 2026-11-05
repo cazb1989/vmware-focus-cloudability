@@ -1,0 +1,185 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  VMware (exports de RVTools) -> FOCUS 1.0 -> S3 para IBM Cloudability (Custom Data / FOCUS Ingress).
+  Lambda disparada por cada archivo nuevo en el inbox + ejecución diaria, usuario IAM de solo subida.
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Bucket S3 (Root Directory en Cloudability). Debe existir y tener EventBridge habilitado (deploy.sh lo hace).
+  CodeKey:
+    Type: String
+    Description: Key del zip de la Lambda dentro del bucket (deploy.sh lo sube).
+  SubDir:
+    Type: String
+    Default: vmware
+    Description: Subcarpeta de los drops FOCUS (= Sub Directories en Cloudability).
+  InboxPrefix:
+    Type: String
+    Default: vmware-inbox
+    Description: Carpeta donde se suben los exports de RVTools.
+  StatePrefix:
+    Type: String
+    Default: vmware-state
+    Description: Carpeta de fotos, configuración y archivos procesados.
+  ScheduleExpression:
+    Type: String
+    Default: cron(30 23 * * ? *)
+    Description: Regeneración diaria (23:30 UTC = 17:30 CDMX / 18:30 Lima). Debe ser después de la subida de RVTools.
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: (Opcional) email para avisar si la Lambda falla.
+
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+
+Resources:
+  FunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: rvtools-focus
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:DeleteObject]
+                Resource: !Sub arn:${AWS::Partition}:s3:::${BucketName}/${InboxPrefix}/*
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject]
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::${BucketName}/${StatePrefix}/*
+                  - !Sub arn:${AWS::Partition}:s3:::${BucketName}/${SubDir}/*
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub arn:${AWS::Partition}:s3:::${BucketName}
+                Condition:
+                  StringLike:
+                    s3:prefix: [!Sub "${StatePrefix}/*", !Sub "${InboxPrefix}/*"]
+
+  ExportFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: vmware-rvtools-focus
+      Description: RVTools vInfo -> FOCUS 1.0 drop para Cloudability
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      Role: !GetAtt FunctionRole.Arn
+      Timeout: 900
+      MemorySize: 1024
+      Code:
+        S3Bucket: !Ref BucketName
+        S3Key: !Ref CodeKey
+      Environment:
+        Variables:
+          BUCKET: !Ref BucketName
+          SUB_DIR: !Ref SubDir
+          INBOX_PREFIX: !Ref InboxPrefix
+          STATE_PREFIX: !Ref StatePrefix
+
+  FunctionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/vmware-rvtools-focus
+      RetentionInDays: 30
+
+  # Cada archivo nuevo en el inbox dispara la Lambda
+  NewExportRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Nuevo export de RVTools en el inbox
+      EventPattern:
+        source: [aws.s3]
+        detail-type: [Object Created]
+        detail:
+          bucket:
+            name: [!Ref BucketName]
+          object:
+            key: [{ prefix: !Sub "${InboxPrefix}/" }]
+      Targets:
+        - Id: vmware-rvtools-focus
+          Arn: !GetAtt ExportFunction.Arn
+
+  NewExportPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ExportFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt NewExportRule.Arn
+
+  DailySchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Regenera el drop VMware del mes una vez al día
+      ScheduleExpression: !Ref ScheduleExpression
+      Targets:
+        - Id: vmware-rvtools-focus-daily
+          Arn: !GetAtt ExportFunction.Arn
+
+  DailyPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ExportFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DailySchedule.Arn
+
+  # Identidad del servidor on-prem (colector Linux o RVTools): SOLO puede subir al inbox
+  UploaderUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: vmware-inventory-uploader
+      Policies:
+        - PolicyName: put-vmware-inventory
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub arn:${AWS::Partition}:s3:::${BucketName}/${InboxPrefix}/*
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Condition: HasAlertEmail
+    Properties:
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+
+  ErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlertEmail
+    Properties:
+      AlarmDescription: El proceso RVTools -> FOCUS falló
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ExportFunction
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
+Outputs:
+  FunctionName:
+    Value: !Ref ExportFunction
+  InboxPath:
+    Value: !Sub s3://${BucketName}/${InboxPrefix}/
+  UploaderUser:
+    Value: !Ref UploaderUser
+  ConfigPath:
+    Value: !Sub s3://${BucketName}/${StatePrefix}/config.json
