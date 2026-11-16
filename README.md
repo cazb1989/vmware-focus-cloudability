@@ -9,15 +9,17 @@ y GB de disco) aplicado al inventario de cada día, como describe la *Guía de t
 datos VMware a FOCUS*.
 
 ```
-  Centro de datos del cliente                         Cuenta AWS                         IBM Cloudability
-┌─────────────────────────────────┐     HTTPS     ┌──────────────────────────────────┐
-│ Linux + cron (recomendado)      │   (solo       │ S3  vmware-inbox/   ──evento──►  │
-│   vcenter_collector.py (pyVmomi)├──subida)────► │       Lambda vmware-rvtools-focus│     Custom Data
-│   ──► vInfo.csv                 │               │         │ fotos diarias por vCenter│   (FOCUS Ingress)
-│  o bien                         │               │         ▼                        │        ▲
-│ Windows + RVTools (alternativa) │               │ S3  vmware/VMware/<mes>/<epoch>/ ├────────┘
-│   ──► vInfo.xlsx                │               │     + EventBridge diario 23:30 UTC│  (rol de solo lectura)
-└─────────────────────────────────┘               └──────────────────────────────────┘
+  Centro de datos del cliente                         Cuenta AWS                          IBM Cloudability
+┌─────────────────────────────────┐     HTTPS     ┌───────────────────────────────────┐
+│ Linux + cron (recomendado)      │    (solo      │ S3  vmware-inbox/  ──evento──┐    │
+│   vcenter_collector.py (pyVmomi)├───subida)───► │                              ▼    │
+│   ──► vInfo.csv                 │               │   Lambda vmware-rvtools-focus     │   ┌──────────────────┐
+│  o bien                         │               │   (fotos diarias por vCenter)     │   │   Custom Data    │
+│ Windows + RVTools (alternativa) │               │              │                    │   │ (FOCUS Ingress)  │
+│   ──► vInfo.xlsx                │               │              ▼                    │   └────────┬─────────┘
+└─────────────────────────────────┘               │ S3  vmware/VMware/<mes>/<epoch>/  │◄───────────┘
+                                                  │   + EventBridge diario 23:30 UTC  │  lee 1 vez al día
+                                                  └───────────────────────────────────┘  (rol de solo lectura)
 ```
 
 **Características:**
