@@ -1,8 +1,7 @@
 # VMware vSphere → FOCUS 1.0 → IBM Cloudability
 
 Esta solución lleva el costo de la **nube privada VMware** a **IBM Cloudability** con el estándar
-[FOCUS](https://focus.finops.org/), de forma diaria y automática. Usa el mismo patrón que la
-integración de Confluent: **S3 → Lambda → drop FOCUS → Cloudability *Other Data Sources***.
+[FOCUS](https://focus.finops.org/), de forma diaria y automática. 
 
 VMware no factura por uso. El costo se calcula con el **tarifario interno** (por vCPU, GB de RAM
 y GB de disco) aplicado al inventario de cada día, como describe la *Guía de transformación de
@@ -98,9 +97,6 @@ El script hace todo esto:
 - Sube `config.json` y el código con `openpyxl`.
 - Despliega el stack `vmware-rvtools-focus`.
 - Al final imprime los valores para Cloudability.
-
-> Puedes usar el **mismo bucket** de otra integración FOCUS, como Confluent. Cada fuente va en su
-> propia subcarpeta (`vmware/`) y tiene su propia credencial en Cloudability.
 
 Crea la credencial del servidor on-prem, que **solo puede subir al inbox**:
 ```bash
